@@ -5,6 +5,7 @@ import os
 from dotenv import load_dotenv
 
 from .auth import TwitchAuth
+from .market import MarketEngine
 from .twitch import TwitchClient
 
 
@@ -23,11 +24,20 @@ async def run() -> None:
 
     auth = TwitchAuth.from_environment()
     await auth.validate_or_refresh()
+    home_channel_id = os.environ["TWITCH_USER_ID"]
+    configured_channels = os.getenv("CHANNEL_IDS", home_channel_id)
+    channel_ids = list(dict.fromkeys(
+        item.strip() for item in configured_channels.split(",") if item.strip()
+    ))
+    if not channel_ids:
+        raise RuntimeError("CHANNEL_IDS must contain at least one broadcaster user id")
+    market = MarketEngine(legacy_channel_id=home_channel_id)
     token_task = asyncio.create_task(auth.maintain_token())
     try:
-        async with TwitchClient(auth, os.environ["TWITCH_USER_ID"]) as client:
+        async with TwitchClient(auth, home_channel_id, market, channel_ids) as client:
             await client.run()
     finally:
+        market.close()
         token_task.cancel()
         await asyncio.gather(token_task, return_exceptions=True)
 

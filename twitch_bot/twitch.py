@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import random
+import time
 from collections import deque
 
 import httpx
@@ -11,7 +12,8 @@ import websockets
 from websockets.exceptions import WebSocketException
 
 from .auth import TwitchAuth
-from .commands import COMMANDS
+from .commands import COMMANDS, CommandContext
+from .market import MarketEngine
 
 logger = logging.getLogger(__name__)
 EVENTSUB_URL = "wss://eventsub.wss.twitch.tv/ws"
@@ -20,13 +22,17 @@ HELIX_CHAT_MESSAGES = "https://api.twitch.tv/helix/chat/messages"
 
 
 class TwitchClient:
-    def __init__(self, auth: TwitchAuth, user_id: str) -> None:
+    def __init__(self, auth: TwitchAuth, user_id: str, market: MarketEngine,
+                 channel_ids: list[str]) -> None:
         self.auth = auth
         self.user_id = user_id
+        self.market = market
+        self.channel_ids = tuple(dict.fromkeys(channel_ids))
         self.http = httpx.AsyncClient(timeout=20)
         self._stopping = False
         self._sent_message_ids: deque[str] = deque(maxlen=200)
         self._sent_message_id_set: set[str] = set()
+        self._last_command_at: dict[tuple[str, str], float] = {}
 
     async def __aenter__(self) -> "TwitchClient":
         return self
@@ -48,25 +54,26 @@ class TwitchClient:
         raise RuntimeError("Helix request failed after token refresh")
 
     async def subscribe_chat(self, session_id: str) -> None:
-        await self._helix(
-            "POST", HELIX_SUBSCRIPTIONS,
-            json={
-                "type": "channel.chat.message",
-                "version": "1",
-                "condition": {
-                    "broadcaster_user_id": self.user_id,
-                    "user_id": self.user_id,
+        for channel_id in self.channel_ids:
+            await self._helix(
+                "POST", HELIX_SUBSCRIPTIONS,
+                json={
+                    "type": "channel.chat.message",
+                    "version": "1",
+                    "condition": {
+                        "broadcaster_user_id": channel_id,
+                        "user_id": self.user_id,
+                    },
+                    "transport": {"method": "websocket", "session_id": session_id},
                 },
-                "transport": {"method": "websocket", "session_id": session_id},
-            },
-        )
-        logger.info("Subscribed to channel chat messages")
+            )
+            logger.info("Subscribed to chat messages for channel %s", channel_id)
 
-    async def send_chat_message(self, message: str) -> None:
+    async def send_chat_message(self, message: str, broadcaster_id: str) -> None:
         response = await self._helix(
             "POST", HELIX_CHAT_MESSAGES,
             json={
-                "broadcaster_id": self.user_id,
+                "broadcaster_id": broadcaster_id,
                 "sender_id": self.user_id,
                 "message": message,
             },
@@ -86,6 +93,14 @@ class TwitchClient:
         message_id = str(event.get("message_id", ""))
         if message_id in self._sent_message_id_set:
             return
+        channel_id = str(event.get("broadcaster_user_id", ""))
+        if channel_id not in self.channel_ids:
+            return
+        chatter_id = str(event.get("chatter_user_id", ""))
+        if not chatter_id:
+            return
+        user_name = str(event.get("chatter_user_name", "viewer"))
+        self.market.touch_user(channel_id, chatter_id, user_name)
         message = event.get("message")
         if not isinstance(message, dict):
             return
@@ -97,13 +112,29 @@ class TwitchClient:
         handler = COMMANDS.get(name)
         if handler is None:
             return
-        user_name = str(event.get("chatter_user_name", ""))
         arguments = parts[1] if len(parts) > 1 else ""
-        chatter_id = str(event.get("chatter_user_id", ""))
         logger.info("Chat command received: !%s from user %s", name, chatter_id)
-        reply = await handler(user_name, arguments)
+        now = time.monotonic()
+        rate_key = (channel_id, chatter_id)
+        if now - self._last_command_at.get(rate_key, float("-inf")) < 1.0:
+            return
+        self._last_command_at[rate_key] = now
+        badges = event.get("badges", [])
+        badge_ids = {
+            str(badge.get("set_id", ""))
+            for badge in badges if isinstance(badge, dict)
+        } if isinstance(badges, list) else set()
+        context = CommandContext(
+            channel_id=channel_id,
+            user_id=chatter_id,
+            display_name=user_name,
+            is_moderator="moderator" in badge_ids,
+            is_broadcaster="broadcaster" in badge_ids,
+            market=self.market,
+        )
+        reply = await handler(context, arguments)
         if reply:
-            await self.send_chat_message(reply)
+            await self.send_chat_message(reply[:500], channel_id)
 
     async def _session(self, url: str, is_reconnect: bool = False) -> str | None:
         async with websockets.connect(url, ping_interval=None, close_timeout=10) as ws:
