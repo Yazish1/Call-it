@@ -43,4 +43,4 @@ LMSR. Virtual points only: never add real money, purchases, or cash-out of any k
 
 ## Codex sessions (for submission)
 
-- Session 1 (steps 1-2): <add ID>
+- Session 1 (steps 1-2): 01a176e8-602e-7131-a02c-52dc82a0fa0e
