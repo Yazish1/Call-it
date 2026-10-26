@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 
 from .auth import TwitchAuth
 from .market import MarketEngine
+from .overlay import overlay_server
 from .twitch import TwitchClient
 
 
@@ -34,8 +35,11 @@ async def run() -> None:
     market = MarketEngine(legacy_channel_id=home_channel_id)
     token_task = asyncio.create_task(auth.maintain_token())
     try:
-        async with TwitchClient(auth, home_channel_id, market, channel_ids) as client:
-            await client.run()
+        async with overlay_server(market):
+            logging.getLogger(__name__).info("OBS overlay: http://127.0.0.1:%s/overlay/<channel_id>",
+                                              os.getenv("OVERLAY_PORT", "8080"))
+            async with TwitchClient(auth, home_channel_id, market, channel_ids) as client:
+                await client.run()
     finally:
         market.close()
         token_task.cancel()

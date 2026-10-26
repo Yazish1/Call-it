@@ -1,6 +1,7 @@
 import pytest
 
 from twitch_bot.market import MarketEngine
+from twitch_bot.overlay import build_overlay_state
 from twitch_bot.pricing import prices, shares_for_cost, cost
 
 
@@ -96,6 +97,86 @@ def test_same_user_has_independent_channel_markets_balances_and_profit():
             engine.current_market("channel-a")
         assert engine.current_market("channel-b")["question"] == "Channel B question"
         assert engine.points("channel-b", "shared-user")["balance"] == pytest.approx(1000)
+    finally:
+        engine.close()
+
+
+def test_overlay_state_is_channel_scoped_and_tracks_trade_history():
+    engine = MarketEngine(":memory:")
+    try:
+        engine.touch_user("channel-a", "alice", "Alice")
+        engine.touch_user("channel-b", "bob", "Bob")
+        engine.open_market("channel-a", "A question")
+        engine.open_market("channel-b", "B question")
+        engine.buy("channel-a", "alice", "yes", "100")
+        engine.buy("channel-b", "bob", "no", "200")
+
+        state_a = build_overlay_state(engine, "channel-a")
+        state_b = build_overlay_state(engine, "channel-b")
+        assert state_a["question"] == "A question"
+        assert state_a["status"] == "open"
+        assert state_a["yes_price"] > 0.5
+        assert state_a["price_history"] == [state_a["yes_price"]]
+        assert state_a["trades"] == [{"user": "Alice", "side": "yes", "action": "buy",
+                                      "points": 100}]
+        assert state_b["question"] == "B question"
+        assert state_b["yes_price"] < 0.5
+        assert state_b["trades"][0]["user"] == "Bob"
+        assert all(entry["user"] != "Bob" for entry in state_a["trades"])
+        assert all(entry["user"] != "Alice" for entry in state_b["trades"])
+
+        engine.resolve("channel-a", "yes")
+        resolved = build_overlay_state(engine, "channel-a")
+        assert resolved["status"] == "resolved"
+        assert resolved["last_result"]["outcome"] == "yes"
+        assert build_overlay_state(engine, "channel-b")["status"] == "open"
+    finally:
+        engine.close()
+
+
+def test_overlay_leaderboard_uses_live_profit_then_final_profit():
+    engine = MarketEngine(":memory:")
+    try:
+        engine.touch_user("channel-a", "alice", "Alice")
+        engine.touch_user("channel-a", "bob", "Bob")
+        engine.open_market("channel-a", "Live ranking market")
+        engine.buy("channel-a", "alice", "yes", "300")
+        engine.buy("channel-a", "bob", "no", "200")
+
+        market = engine.current_market("channel-a")
+        expected = {}
+        for user_id, name in (("alice", "Alice"), ("bob", "Bob")):
+            position = engine.connection.execute(
+                "SELECT * FROM positions WHERE channel_id=? AND market_id=? AND user_id=?",
+                ("channel-a", market["id"], user_id),
+            ).fetchone()
+            past_profit = engine.connection.execute(
+                "SELECT cumulative_profit FROM users WHERE channel_id=? AND user_id=?",
+                ("channel-a", user_id),
+            ).fetchone()[0]
+            expected[name] = round(
+                past_profit + position["balance"]
+                + position["yes_shares"] * market["yes"]
+                + position["no_shares"] * market["no"] - position["stake"], 2
+            )
+
+        state = build_overlay_state(engine, "channel-a")
+        assert {row["user"]: row["profit"] for row in state["leaderboard"]} == pytest.approx(
+            expected
+        )
+        assert [row["user"] for row in state["leaderboard"]] == sorted(
+            expected, key=expected.get, reverse=True
+        )
+
+        engine.resolve("channel-a", "yes")
+        final = build_overlay_state(engine, "channel-a")
+        profits = {
+            row["display_name"]: row["cumulative_profit"]
+            for row in engine.leaderboard("channel-a")
+        }
+        assert {row["user"]: row["profit"] for row in final["leaderboard"]} == {
+            name: pytest.approx(profits[name]) for name in profits
+        }
     finally:
         engine.close()
 

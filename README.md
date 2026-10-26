@@ -61,3 +61,16 @@ created automatically. Existing single-channel databases are migrated to the
 channel in `TWITCH_USER_ID` at startup.
 
 Run the market tests with `python -m pytest`.
+
+## OBS overlay
+
+The bot serves a transparent, channel-specific overlay on `127.0.0.1:8080`.
+Set `OVERLAY_PORT` in `.env` to use a different port. In OBS, add a **Browser
+Source**, set its URL to `http://127.0.0.1:8080/overlay/<channel_id>` (replace
+`<channel_id>` with the broadcaster's Twitch user ID), and set width to **480**
+and height to **600**. The page uses a live Server-Sent Events stream and reconnects
+automatically if the connection drops.
+
+To preview it with fake channels, run `python -m twitch_bot.simulate --serve`.
+The simulator prints one overlay URL per channel. Use `--speed 2` to run the
+simulation about twice as fast, or `--speed 0.5` to slow it down.
