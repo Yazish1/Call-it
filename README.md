@@ -56,6 +56,7 @@ http://127.0.0.1:8080/overlay/fake-channel-a
    ```
 
    Copy the resulting user access token and refresh token. The Twitch account whose token you use is the bot account (`TWITCH_USER_ID`); it also needs to be authorized to read and write chat in each broadcaster's channel.
+
 3. Create `.env` in the project root with your own values (these placeholders are not credentials):
 
    ```dotenv
@@ -81,29 +82,30 @@ http://127.0.0.1:8080/overlay/fake-channel-a
    ```
 
    The bot validates its token, refreshes it when needed, connects to EventSub, and serves the overlay on `127.0.0.1`.
+
 5. In OBS, add a **Browser Source** with `http://127.0.0.1:8080/overlay/<channel_id>` (replace the port if `OVERLAY_PORT` differs, and replace `<channel_id>` with that broadcaster's user ID). Set the source to **480 × 600**.
 
 To add other channels, list their broadcaster user IDs in `CHANNEL_IDS`; each broadcaster must authorize the app/bot to access their chat. `CHANNEL_IDS` is optional and defaults to `TWITCH_USER_ID`.
 
 ## Chat commands
 
-| Command | Who can use it | Example |
-| --- | --- | --- |
-| `!market "question"` | Broadcaster or moderator | `!market "Will the next match go to overtime?"` |
-| `!odds` | Anyone | `!odds` |
-| `!buy <yes\|no> <points>` | Anyone | `!buy yes 100` |
-| `!sell <yes\|no> <shares>` | Anyone | `!sell no 2.5` |
-| `!points` | Anyone | `!points` |
-| `!leaderboard` | Anyone | `!leaderboard` |
-| `!resolve <yes\|no>` | Broadcaster or moderator | `!resolve yes` |
-| `!cancel` | Broadcaster or moderator | `!cancel` |
-| `!ping` | Anyone | `!ping` |
-| `!auto off\|suggest\|on` | Broadcaster or moderator | `!auto suggest` |
-| `!auto templates <list>` | Broadcaster or moderator | `!auto templates emote unique-chatters` |
-| `!auto window <seconds>` | Broadcaster or moderator | `!auto window 180` |
-| `!auto lock <seconds>` | Broadcaster or moderator | `!auto lock 10` |
-| `!auto status` | Broadcaster or moderator | `!auto status` |
-| `!approve`, `!skip` | Broadcaster or moderator | `!approve` |
+| Command                    | Who can use it           | Example                                         |
+| -------------------------- | ------------------------ | ----------------------------------------------- |
+| `!market "question"`       | Broadcaster or moderator | `!market "Will the next match go to overtime?"` |
+| `!odds`                    | Anyone                   | `!odds`                                         |
+| `!buy <yes\|no> <points>`  | Anyone                   | `!buy yes 100`                                  |
+| `!sell <yes\|no> <shares>` | Anyone                   | `!sell no 2.5`                                  |
+| `!points`                  | Anyone                   | `!points`                                       |
+| `!leaderboard`             | Anyone                   | `!leaderboard`                                  |
+| `!resolve <yes\|no>`       | Broadcaster or moderator | `!resolve yes`                                  |
+| `!cancel`                  | Broadcaster or moderator | `!cancel`                                       |
+| `!ping`                    | Anyone                   | `!ping`                                         |
+| `!auto off\|suggest\|on`   | Broadcaster or moderator | `!auto suggest`                                 |
+| `!auto templates <list>`   | Broadcaster or moderator | `!auto templates emote unique-chatters`         |
+| `!auto window <seconds>`   | Broadcaster or moderator | `!auto window 180`                              |
+| `!auto lock <seconds>`     | Broadcaster or moderator | `!auto lock 10`                                 |
+| `!auto status`             | Broadcaster or moderator | `!auto status`                                  |
+| `!approve`, `!skip`        | Broadcaster or moderator | `!approve`                                      |
 
 ## How it works
 
@@ -140,12 +142,12 @@ python -m pytest
 
 Configuration constants in `twitch_bot/market.py`:
 
-| Setting | Default | Meaning |
-| --- | ---: | --- |
-| `LIQUIDITY_B` | `100.0` | LMSR liquidity for each market. |
-| `STAKE_PER_MARKET` | `1000.0` | Starting virtual points allocated to each viewer in each market. |
+| Setting                        |       Default | Meaning                                                                      |
+| ------------------------------ | ------------: | ---------------------------------------------------------------------------- |
+| `LIQUIDITY_B`                  |       `100.0` | LMSR liquidity for each market.                                              |
+| `STAKE_PER_MARKET`             |      `1000.0` | Starting virtual points allocated to each viewer in each market.             |
 | `AUTO_MARKET_COOLDOWN_SECONDS` | `120` seconds | Minimum wait between auto markets in a channel; can be overridden in `.env`. |
-| `OVERLAY_PORT` | `8080` | Local HTTP port for the overlay; can be overridden in `.env`. |
+| `OVERLAY_PORT`                 |        `8080` | Local HTTP port for the overlay; can be overridden in `.env`.                |
 
 Simulator options (run `python -m twitch_bot.simulate --help` for the parser's help): `--channel` can be repeated to choose fake channel IDs; `--viewers` defaults to `30`; `--duration` defaults to `10` seconds; `--serve` starts the overlay; `--speed` defaults to `1`; `--auto` demonstrates an auto market (`--auto-duration` defaults to 5 seconds); `--demo` loops through auto templates (`--auto-duration` defaults to 60 seconds); and `--trade-rate` defaults to 2 trades per second. The simulator uses a temporary SQLite database and does not connect to Twitch.
 
@@ -159,4 +161,12 @@ Secrets belong in `.env`. The file is gitignored and must never be committed. To
 
 OpenAI Codex was used to build and refine the Twitch integration, virtual-points market engine, simulator, OBS overlay, and tests. Add the project session references used for this submission below.
 
-Codex session IDs: <ADD>
+Codex session IDs:
+
+- Session 1: 01a176e8-602e-7131-a02c-52dc82a0fa0e
+- Session 2: 01a17708-048c-76e1-8115-1f59c12a2d28
+- Session 3: 01a1770e-59d6-7393-aba0-4a10817222bb
+- Session 4: 01a1771b-c58c-73d2-a789-b95567a0f36e
+- Session 5: 01a17b24-70da-7f42-9a92-c520a8799757
+- Session 6: 01a17b62-1f7d-7b11-82d1-5a6ef2445411
+- Session 7: 01a17b65-851f-7dd2-b8ae-4e112e2c5932

@@ -52,13 +52,3 @@ Use `--demo` for looping auto-template cycles (60-second windows by default);
 `--trade-rate` controls the approximate aggregate trades per second. `--demo`
 implies auto mode and may be combined with `--auto`. The regular simulator
 remains fixed-seed and deterministic when `--demo` is not selected.
-
-## Codex sessions (for submission)
-
-- Session 1: 01a176e8-602e-7131-a02c-52dc82a0fa0e
-- Session 2: 01a17708-048c-76e1-8115-1f59c12a2d28
-- Session 3: 01a1770e-59d6-7393-aba0-4a10817222bb
-- Session 4: 01a1771b-c58c-73d2-a789-b95567a0f36e
-- Session 5: 01a17b24-70da-7f42-9a92-c520a8799757
-- Session 6: 01a17b62-1f7d-7b11-82d1-5a6ef2445411
-- Session 7: 01a17b65-851f-7dd2-b8ae-4e112e2c5932
