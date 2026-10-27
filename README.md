@@ -1,4 +1,4 @@
-# Twitch Chat Markets
+# Call it
 
 A prediction market for Twitch chat: viewers buy and sell YES/NO shares on live outcomes using virtual points, and the odds move with every trade. A broadcaster or moderator can open a market, or chat activity can open and resolve auto markets. A live OBS overlay shows the market, prices, recent trades, and top players.
 
@@ -25,9 +25,11 @@ Demo video: https://youtu.be/KJtnoRKYKMc
 
 ## Quick start: simulator, no Twitch credentials
 
-Requires Python 3.11 or newer. From the project root, install dependencies and start the looping simulator with its overlay:
+Requires Python 3.11 or newer
 
 ```powershell
+git clone https://github.com/Yazish1/Call-it.git
+cd Call-it
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
@@ -156,7 +158,7 @@ Secrets belong in `.env`. The file is gitignored and must never be committed. To
 
 ## Built with Codex
 
-OpenAI Codex was used to build and refine the Twitch integration, virtual-points market engine, simulator, OBS overlay, and tests. Add the project session references used for this submission below.
+OpenAI Codex was used to build and refine the Twitch integration, virtual-points market engine, simulator, OBS overlay, and tests.
 
 Codex session IDs:
 
