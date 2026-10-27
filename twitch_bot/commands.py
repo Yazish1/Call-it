@@ -44,13 +44,33 @@ async def ping(_context: CommandContext, _arguments: str) -> str:
 @command("auto")
 async def auto(context: CommandContext, arguments: str) -> str:
     if not _admin(context): return "Only the broadcaster or a moderator can change auto markets."
-    action=arguments.strip().lower()
-    if action=="on":
-        context.market.set_auto(context.channel_id, True); return "Auto markets enabled."
-    if action=="off":
-        context.market.set_auto(context.channel_id, False); return "Auto markets disabled."
-    if action=="status": return "Auto markets are " + ("ON." if context.market.auto_enabled(context.channel_id) else "OFF.")
-    return "Usage: !auto <on|off|status>"
+    parts=arguments.lower().split(); action=parts[0] if parts else "status"
+    try:
+        if action in {"on","off","suggest"}:
+            context.market.set_auto(context.channel_id,action); return f"Auto markets set to {action}."
+        if action=="templates":
+            context.market.configure_auto(context.channel_id,templates=parts[1:]); return "Auto templates updated."
+        if action=="window" and len(parts)==2:
+            context.market.configure_auto(context.channel_id,window_seconds=int(parts[1])); return "Auto window updated."
+        if action=="lock" and len(parts)==2:
+            context.market.configure_auto(context.channel_id,lock_seconds=int(parts[1])); return "Auto trading lock updated."
+        if action=="status":
+            s=context.market.auto_settings(context.channel_id)
+            return f"Auto {s['mode']}; templates {s['templates']}; window {s['window_seconds']}s; lock {s['lock_seconds']}s."
+    except (MarketError,ValueError) as exc: return str(exc)
+    return "Usage: !auto off|suggest|on; !auto templates <list>; !auto window <30-600>; !auto lock <seconds>; !auto status"
+
+@command("approve")
+async def approve(context: CommandContext, _arguments: str) -> str:
+    if not _admin(context): return "Only the broadcaster or a moderator can approve a proposal."
+    try: m=context.market.approve_auto(context.channel_id)
+    except MarketError as exc: return str(exc)
+    return f'Auto market approved: "{m["question"]}".'
+
+@command("skip")
+async def skip(context: CommandContext, _arguments: str) -> str:
+    if not _admin(context): return "Only the broadcaster or a moderator can skip a proposal."
+    return "Auto market proposal skipped." if context.market.skip_auto(context.channel_id) else "There is no pending proposal."
 
 
 @command("market")

@@ -36,6 +36,8 @@ def build_overlay_state(engine: MarketEngine, channel_id: str) -> dict[str, Any]
     if open_market:
         question = market["question"]
         status = "open"
+        auto_info=engine.auto_market_info(channel_id)
+        trading_closed=bool(auto_info and __import__('time').time() >= float(auto_info['deadline'])-int(auto_info['lock_seconds']))
         trade_rows = engine.connection.execute(
             """SELECT t.user_id,u.display_name,t.action,t.side,t.shares,t.points
                FROM trades t JOIN users u ON u.channel_id=t.channel_id AND u.user_id=t.user_id
@@ -98,6 +100,7 @@ def build_overlay_state(engine: MarketEngine, channel_id: str) -> dict[str, Any]
         "last_result": ({"question": resolved["question"], "outcome": resolved["outcome"],
                          "resolved_at": resolved["resolved_at"]} if resolved else None),
         "deadline": (float(engine.auto_market_info(channel_id)["deadline"]) if engine.auto_market_info(channel_id) else None),
+        "trading_closed": trading_closed if open_market else False,
     }
 
 

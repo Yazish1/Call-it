@@ -111,7 +111,10 @@ class TwitchClient:
                 reply=(f'Market resolved {result["outcome"].upper()}: "{result["question"]}".' if kind=="resolve" else f'Market cancelled: "{result["question"]}". Market stakes reset.')
                 await self.send_chat_message(reply[:500],channel_id)
             opened=self.market.maybe_open_auto(channel_id)
-            if opened: await self.send_chat_message(f'Auto market: "{opened["question"]}" Buy with !buy <yes|no> <points>.',channel_id)
+            if opened:
+                prefix='Proposed auto market' if opened.get('proposal') else 'Auto market'
+                suffix=' Approve with !approve or reject with !skip within 60 seconds.' if opened.get('proposal') else ' Buy with !buy <yes|no> <points>.'
+                await self.send_chat_message(f'{prefix}: "{opened["question"]}".{suffix}',channel_id)
         if not isinstance(message, dict):
             return
         if not isinstance(text, str) or not text.startswith("!"):

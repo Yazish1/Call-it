@@ -98,7 +98,12 @@ To add other channels, list their broadcaster user IDs in `CHANNEL_IDS`; each br
 | `!resolve <yes\|no>` | Broadcaster or moderator | `!resolve yes` |
 | `!cancel` | Broadcaster or moderator | `!cancel` |
 | `!ping` | Anyone | `!ping` |
-| `!auto on\|off\|status` | Broadcaster or moderator | `!auto on` |
+| `!auto off\|suggest\|on` | Broadcaster or moderator | `!auto suggest` |
+| `!auto templates <list>` | Broadcaster or moderator | `!auto templates emote unique-chatters` |
+| `!auto window <seconds>` | Broadcaster or moderator | `!auto window 180` |
+| `!auto lock <seconds>` | Broadcaster or moderator | `!auto lock 10` |
+| `!auto status` | Broadcaster or moderator | `!auto status` |
+| `!approve`, `!skip` | Broadcaster or moderator | `!approve` |
 
 ## How it works
 
@@ -112,7 +117,7 @@ C(q_yes, q_no) = b · ln(exp(q_yes / b) + exp(q_no / b))
 
 A buy costs the increase in `C` for the shares received; prices are the marginal probabilities given by the normalized exponential quantities. This makes the displayed YES and NO prices move as trades change the share quantities.
 
-Auto markets are disabled by default in each channel. Once enabled with `!auto on`, the bot cycles through three templates using activity from the preceding five minutes: total chat messages, the most common word/emote, and unique chatters. Markets run for their template window (normally three or five minutes), resolve at the deadline from messages recorded during that market, and are cancelled with stakes reset if fewer than three distinct chatters participated. A cooldown separates auto markets; its default is 120 seconds.
+Auto markets default to **suggest** mode in each channel. The bot proposes markets from the enabled message-volume, emote, and unique-chatter templates; a broadcaster or moderator has 60 seconds to `!approve` or `!skip`. Use `!auto off|suggest|on` to select the mode. `!auto templates <list>` selects one or more template names; `!auto window <seconds>` sets a 30–600 second market window; `!auto lock <seconds>` sets when trading closes before the deadline (10 seconds by default). `!auto status` shows the channel settings. Approved or on-mode markets resolve at the deadline and cancel/refund if fewer than three distinct eligible chatters participated. A cooldown separates auto markets; its default is 120 seconds. Messages and emotes from users who traded in an activity market are excluded from its counters. Activity-based markets can still be influenced by non-traders, so manual markets are recommended for competitive stakes.
 
 ## Project layout and tests
 
@@ -146,7 +151,7 @@ Simulator options (run `python -m twitch_bot.simulate --help` for the parser's h
 
 ## Safety and limits
 
-All balances are virtual points. There is no real-money functionality. This is a hackathon project, not a production service: it requires a valid Twitch user token and channel authorization, runs its overlay on the local machine, and uses a local SQLite database (`market.db`) without a hosted multi-instance setup. Auto-market results reflect only messages received during the window; sparse activity can cancel a market under the three-chatter minimum. A moderator/broadcaster manually resolves regular markets, so resolution depends on their judgment.
+All balances are virtual points. There is no real-money functionality. This is a hackathon project, not a production service: it requires a valid Twitch user token and channel authorization, runs its overlay on the local machine, and uses a local SQLite database (`market.db`) without a hosted multi-instance setup. Auto-market results reflect eligible messages received during the window; sparse activity can cancel a market under the three-chatter minimum. Activity-based markets can still be influenced by non-traders, so manual markets are recommended for competitive stakes. A moderator/broadcaster manually resolves regular markets, so resolution depends on their judgment.
 
 Secrets belong in `.env`. The file is gitignored and must never be committed. Token refresh updates the access and refresh token values in that file; keep it private.
 

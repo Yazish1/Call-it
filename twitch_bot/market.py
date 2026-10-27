@@ -95,7 +95,7 @@ class MarketEngine:
             "CREATE UNIQUE INDEX IF NOT EXISTS one_open_market_per_channel "
             "ON markets(channel_id) WHERE status='open'",
             "CREATE INDEX IF NOT EXISTS trades_channel_market_idx ON trades(channel_id,market_id)",
-            """CREATE TABLE IF NOT EXISTS auto_settings(channel_id TEXT PRIMARY KEY,enabled INTEGER NOT NULL DEFAULT 0)""",
+            """CREATE TABLE IF NOT EXISTS auto_settings(channel_id TEXT PRIMARY KEY,enabled INTEGER NOT NULL DEFAULT 0,mode TEXT NOT NULL DEFAULT 'suggest',templates TEXT NOT NULL DEFAULT 'message-volume,emote,unique-chatters',window_seconds INTEGER NOT NULL DEFAULT 300,lock_seconds INTEGER NOT NULL DEFAULT 10,proposal_question TEXT,proposal_template INTEGER,proposal_expires REAL)""",
             """CREATE TABLE IF NOT EXISTS chat_activity(channel_id TEXT NOT NULL,at REAL NOT NULL,user_id TEXT NOT NULL,text TEXT NOT NULL)""",
             """CREATE TABLE IF NOT EXISTS auto_market_data(market_id INTEGER PRIMARY KEY,channel_id TEXT NOT NULL,deadline REAL NOT NULL,template INTEGER NOT NULL,opened_at REAL NOT NULL,closed_at REAL)""",
         )
@@ -110,6 +110,10 @@ class MarketEngine:
             with self.connection:
                 for statement in self._schema_statements():
                     self.connection.execute(statement)
+                cols={r['name'] for r in self.connection.execute("PRAGMA table_info(auto_settings)")}
+                for n,d in (("mode","TEXT NOT NULL DEFAULT 'suggest'"),("templates","TEXT NOT NULL DEFAULT 'message-volume,emote,unique-chatters'"),("window_seconds","INTEGER NOT NULL DEFAULT 300"),("lock_seconds","INTEGER NOT NULL DEFAULT 10"),("proposal_question","TEXT"),("proposal_template","INTEGER"),("proposal_expires","REAL")):
+                    if n not in cols: self.connection.execute(f"ALTER TABLE auto_settings ADD COLUMN {n} {d}")
+                self.connection.execute("UPDATE auto_settings SET mode=CASE WHEN enabled=1 THEN 'on' ELSE 'off' END WHERE enabled=1")
             return
         if not legacy_channel_id:
             raise RuntimeError(
@@ -275,6 +279,8 @@ class MarketEngine:
             self._user(channel_id, user_id)
             market = self._open_market(channel_id)
             market_id = int(market["id"])
+            auto=self.connection.execute("SELECT d.deadline,s.lock_seconds FROM auto_market_data d JOIN auto_settings s ON s.channel_id=d.channel_id WHERE d.market_id=?",(market_id,)).fetchone()
+            if auto and time.time() >= float(auto['deadline'])-int(auto['lock_seconds']): raise MarketError("Trading is closed for this market.")
             self._enroll(channel_id, market_id, user_id)
             position = self.connection.execute(
                 "SELECT * FROM positions WHERE channel_id=? AND market_id=? AND user_id=?",
@@ -317,6 +323,8 @@ class MarketEngine:
             self._user(channel_id, user_id)
             market = self._open_market(channel_id)
             market_id = int(market["id"])
+            auto=self.connection.execute("SELECT d.deadline,s.lock_seconds FROM auto_market_data d JOIN auto_settings s ON s.channel_id=d.channel_id WHERE d.market_id=?",(market_id,)).fetchone()
+            if auto and time.time() >= float(auto['deadline'])-int(auto['lock_seconds']): raise MarketError("Trading is closed for this market.")
             position = self.connection.execute(
                 "SELECT * FROM positions WHERE channel_id=? AND market_id=? AND user_id=?",
                 (channel_id, market_id, user_id),
@@ -427,16 +435,34 @@ class MarketEngine:
             self.connection.execute("UPDATE auto_market_data SET closed_at=? WHERE market_id=?", (time.time(), market_id))
             return {"question": market["question"]}
 
-    def set_auto(self, channel_id: str, enabled: bool) -> None:
+    def set_auto(self, channel_id: str, enabled: bool | str) -> None:
+        mode = ("on" if enabled else "off") if isinstance(enabled, bool) else enabled
+        if mode not in {"off", "suggest", "on"}: raise MarketError("Mode must be off, suggest, or on.")
         with self.connection:
-            self.connection.execute("INSERT INTO auto_settings(channel_id,enabled) VALUES(?,?) ON CONFLICT(channel_id) DO UPDATE SET enabled=excluded.enabled", (channel_id, int(enabled)))
+            self.connection.execute("INSERT INTO auto_settings(channel_id,enabled,mode) VALUES(?,?,?) ON CONFLICT(channel_id) DO UPDATE SET enabled=excluded.enabled,mode=excluded.mode", (channel_id, int(mode=="on"), mode))
 
     def auto_enabled(self, channel_id: str) -> bool:
-        row = self.connection.execute("SELECT enabled FROM auto_settings WHERE channel_id=?", (channel_id,)).fetchone()
-        return bool(row and row[0])
+        row = self.connection.execute("SELECT mode FROM auto_settings WHERE channel_id=?", (channel_id,)).fetchone()
+        return bool(row and row[0] == "on")
+
+    def auto_settings(self, channel_id: str) -> dict[str, Any]:
+        row=self.connection.execute("SELECT * FROM auto_settings WHERE channel_id=?",(channel_id,)).fetchone()
+        defaults={"mode":"suggest","templates":"message-volume,emote,unique-chatters","window_seconds":300,"lock_seconds":10}
+        return {**defaults, **(dict(row) if row else {})}
+
+    def configure_auto(self, channel_id: str, templates: list[str] | None = None, window_seconds: int | None = None, lock_seconds: int | None = None) -> None:
+        allowed={"message-volume","emote","unique-chatters"}
+        if templates is not None and (not templates or set(templates)-allowed): raise MarketError("Templates: message-volume, emote, unique-chatters.")
+        if window_seconds is not None and not 30<=window_seconds<=600: raise MarketError("Window must be 30-600 seconds.")
+        if lock_seconds is not None and not 0<=lock_seconds<600: raise MarketError("Lock must be 0-599 seconds.")
+        s=self.auto_settings(channel_id)
+        with self.connection:
+            self.connection.execute("INSERT INTO auto_settings(channel_id,enabled,mode,templates,window_seconds,lock_seconds) VALUES(?,?,?,?,?,?) ON CONFLICT(channel_id) DO UPDATE SET templates=excluded.templates,window_seconds=excluded.window_seconds,lock_seconds=excluded.lock_seconds",(channel_id,int(s['mode']=='on'),s['mode'],','.join(templates) if templates is not None else s['templates'],window_seconds if window_seconds is not None else s['window_seconds'],lock_seconds if lock_seconds is not None else s['lock_seconds']))
 
     def record_chat(self, channel_id: str, user_id: str, text: str, now: float | None = None) -> None:
         now = time.time() if now is None else now
+        active=self.connection.execute("SELECT d.market_id FROM auto_market_data d JOIN markets m ON m.id=d.market_id WHERE d.channel_id=? AND m.status='open'",(channel_id,)).fetchone()
+        if active and self.connection.execute("SELECT 1 FROM trades WHERE channel_id=? AND market_id=? AND user_id=? LIMIT 1",(channel_id,active['market_id'],user_id)).fetchone(): return
         with self.connection:
             self.connection.execute("INSERT INTO chat_activity VALUES(?,?,?,?)", (channel_id, now, user_id, text))
             self.connection.execute("DELETE FROM chat_activity WHERE channel_id=? AND at<?", (channel_id, now-3600))
@@ -444,7 +470,10 @@ class MarketEngine:
     def maybe_open_auto(self, channel_id: str, now: float | None = None, duration: float | None = None,
                         cooldown_seconds: int | None = None) -> dict[str, Any] | None:
         now = time.time() if now is None else now
-        if not self.auto_enabled(channel_id) or self.connection.execute("SELECT 1 FROM markets WHERE channel_id=? AND status='open'", (channel_id,)).fetchone(): return None
+        settings=self.auto_settings(channel_id); mode=settings['mode']
+        if mode=='off' or self.connection.execute("SELECT 1 FROM markets WHERE channel_id=? AND status='open'", (channel_id,)).fetchone(): return None
+        pending=self.connection.execute("SELECT proposal_expires FROM auto_settings WHERE channel_id=?",(channel_id,)).fetchone()
+        if pending and pending[0] and now<float(pending[0]): return None
         last = self.connection.execute("SELECT MAX(COALESCE((SELECT closed_at FROM auto_market_data WHERE market_id=markets.id),strftime('%s',resolved_at))) FROM markets WHERE channel_id=? AND status IN ('resolved','cancelled')", (channel_id,)).fetchone()[0]
         cooldown = (int(os.getenv("AUTO_MARKET_COOLDOWN_SECONDS", str(AUTO_MARKET_COOLDOWN_SECONDS)))
                     if cooldown_seconds is None else cooldown_seconds)
@@ -457,7 +486,10 @@ class MarketEngine:
             for word in re.findall(r"\w+", row['text'].lower()):
                 if len(word)>1 and not word.startswith('!'): words[word]=words.get(word,0)+1
         state = self.connection.execute("SELECT COALESCE((SELECT template FROM auto_market_data WHERE channel_id=? ORDER BY opened_at DESC LIMIT 1),-1)",(channel_id,)).fetchone()[0]
-        template=(int(state)+1)%3
+        enabled=[x for x in settings['templates'].split(',') if x in {'message-volume','emote','unique-chatters'}]
+        if not enabled: return None
+        template=({'message-volume':0,'emote':1,'unique-chatters':2}[enabled[(int(state)+1)%len(enabled)]])
+        if duration is None: duration=int(settings['window_seconds'])
         if template==0:
             duration=300 if duration is None else duration
             threshold=max(1,round(average*duration/300*1.1)) if count else 50
@@ -470,10 +502,29 @@ class MarketEngine:
             duration=300 if duration is None else duration
             threshold=max(3,round(unique*duration/300*1.1)) if unique else 3
             question=f"Will {threshold}+ different people chat {self._window_text(duration)}?"
+        if mode=='suggest':
+            with self.connection: self.connection.execute("INSERT INTO auto_settings(channel_id,enabled,mode,templates,window_seconds,lock_seconds,proposal_question,proposal_template,proposal_expires) VALUES(?,0,?,?,?,?,?,?,?) ON CONFLICT(channel_id) DO UPDATE SET proposal_question=excluded.proposal_question,proposal_template=excluded.proposal_template,proposal_expires=excluded.proposal_expires",(channel_id,mode,settings['templates'],settings['window_seconds'],settings['lock_seconds'],question,template,now+60))
+            return {"question":question,"proposal":True,"expires":now+60}
         market=self.open_market(channel_id,question)
         with self.connection:
             self.connection.execute("INSERT INTO auto_market_data(market_id,channel_id,deadline,template,opened_at) VALUES(?,?,?,?,?)",(market['id'],channel_id,now+duration,template,now))
         market['deadline']=now+duration; return market
+
+    def approve_auto(self, channel_id: str, now: float | None = None) -> dict[str, Any]:
+        now=time.time() if now is None else now; s=self.auto_settings(channel_id)
+        if not s.get('proposal_question') or not s.get('proposal_expires') or now>float(s['proposal_expires']):
+            with self.connection: self.connection.execute("UPDATE auto_settings SET proposal_question=NULL,proposal_template=NULL,proposal_expires=NULL WHERE channel_id=?",(channel_id,))
+            raise MarketError("There is no unexpired auto-market proposal.")
+        market=self.open_market(channel_id,s['proposal_question']); duration=int(s['window_seconds'])
+        with self.connection:
+            self.connection.execute("INSERT INTO auto_market_data(market_id,channel_id,deadline,template,opened_at) VALUES(?,?,?,?,?)",(market['id'],channel_id,now+duration,int(s['proposal_template']),now))
+            self.connection.execute("UPDATE auto_settings SET proposal_question=NULL,proposal_template=NULL,proposal_expires=NULL WHERE channel_id=?",(channel_id,))
+        market['deadline']=now+duration; return market
+
+    def skip_auto(self, channel_id: str) -> bool:
+        with self.connection:
+            cur=self.connection.execute("UPDATE auto_settings SET proposal_question=NULL,proposal_template=NULL,proposal_expires=NULL WHERE channel_id=? AND proposal_question IS NOT NULL",(channel_id,))
+        return cur.rowcount>0
 
     @staticmethod
     def _window_text(duration: float) -> str:
@@ -483,12 +534,12 @@ class MarketEngine:
         return f"in the next {duration:g} seconds"
 
     def auto_market_info(self, channel_id: str):
-        return self.connection.execute("SELECT d.*,m.question FROM auto_market_data d JOIN markets m ON m.id=d.market_id WHERE d.channel_id=? AND m.status='open'",(channel_id,)).fetchone()
+        return self.connection.execute("SELECT d.*,m.question,s.lock_seconds FROM auto_market_data d JOIN markets m ON m.id=d.market_id JOIN auto_settings s ON s.channel_id=d.channel_id WHERE d.channel_id=? AND m.status='open'",(channel_id,)).fetchone()
 
     def settle_due_auto(self, channel_id: str, now: float | None = None) -> tuple[str,dict[str,Any]] | None:
         now=time.time() if now is None else now; data=self.auto_market_info(channel_id)
         if not data or now<float(data['deadline']): return None
-        rows=self.connection.execute("SELECT user_id,text FROM chat_activity WHERE channel_id=? AND at>=? AND at<=?",(channel_id,data['opened_at'],data['deadline'])).fetchall()
+        rows=self.connection.execute("SELECT user_id,text FROM chat_activity a WHERE channel_id=? AND at>=? AND at<=? AND NOT EXISTS (SELECT 1 FROM trades t WHERE t.channel_id=a.channel_id AND t.market_id=? AND t.user_id=a.user_id)",(channel_id,data['opened_at'],data['deadline'],data['market_id'])).fetchall()
         if len({r['user_id'] for r in rows})<3: return 'cancel',self.cancel(channel_id)
         if data['template']==0:
             threshold=int(re.search(r"send (\d+)",data['question']).group(1)); yes=len(rows)>=threshold

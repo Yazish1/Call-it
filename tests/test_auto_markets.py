@@ -1,4 +1,6 @@
 import asyncio
+import time
+import pytest
 
 from twitch_bot.market import MarketEngine
 from twitch_bot.overlay import format_countdown
@@ -78,4 +80,39 @@ def test_auto_cooldown_and_channel_isolation():
         engine.set_auto("b",True)
         assert engine.maybe_open_auto("b",now=150) is not None
         assert not engine.auto_enabled("c")
+    finally: engine.close()
+
+
+def test_suggest_approve_expiry_and_channel_settings():
+    engine=MarketEngine(":memory:")
+    try:
+        for i in range(3): engine.record_chat("a",f"u{i}","Pog",100+i)
+        proposal=engine.maybe_open_auto("a",now=110,duration=60)
+        assert proposal["proposal"] and engine.auto_market_info("a") is None
+        assert engine.approve_auto("a",now=120)["question"]==proposal["question"]
+        assert engine.auto_market_info("b") is None
+        engine.cancel("a")
+        second=engine.maybe_open_auto("a",now=time.time()+1000,duration=60,cooldown_seconds=0)
+        assert second["proposal"]
+        with pytest.raises(ValueError): engine.approve_auto("a",now=time.time()+1061)
+        engine.configure_auto("a",templates=["emote","unique-chatters"],window_seconds=90,lock_seconds=5)
+        assert engine.auto_settings("a")["window_seconds"]==90
+        assert engine.auto_settings("b")["window_seconds"]==300
+    finally: engine.close()
+
+
+def test_trader_excluded_and_auto_trade_lock():
+    engine=MarketEngine(":memory:")
+    try:
+        engine.set_auto("lock","on")
+        opened=engine.maybe_open_auto("lock",now=time.time(),duration=60,cooldown_seconds=0)
+        engine.touch_user("lock","trader","Trader")
+        engine.buy("lock","trader","yes","10")
+        engine.record_chat("lock","trader","Pog Pog",time.time())
+        engine.record_chat("lock","other","Pog",time.time())
+        engine.touch_user("lock","other","Other")
+        assert engine.connection.execute("SELECT COUNT(*) FROM chat_activity WHERE channel_id='lock'").fetchone()[0]==1
+        engine.configure_auto("lock",lock_seconds=60)
+        with pytest.raises(ValueError,match="Trading is closed"):
+            engine.buy("lock","other","yes","10")
     finally: engine.close()

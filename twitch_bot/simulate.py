@@ -122,6 +122,7 @@ async def run_simulation(engine: MarketEngine, channels: list[str], viewers: int
 async def run_auto_demo(engine: MarketEngine, channel: str, viewers: int, duration: float) -> None:
     """Exercise an automatically opened market with short fake chat traffic."""
     engine.set_auto(channel, True)
+    engine.configure_auto(channel, lock_seconds=0)
     for i in range(max(3, viewers)):
         user=f"viewer-{i}"; engine.touch_user(channel,user,f"Viewer{i}")
         engine.record_chat(channel,user,"Pog",time.time())
@@ -173,6 +174,7 @@ async def run_demo_cycle(engine: MarketEngine, channel: str, viewers: int,
         raise ValueError("viewers, trade rate, and cycle duration must be positive")
     rng=random.Random(seed)
     engine.set_auto(channel,True)
+    engine.configure_auto(channel, lock_seconds=0)
     players=_demo_profiles(viewers,rng)
     for user_id,name,_ in players: engine.touch_user(channel,user_id,name)
     market=engine.maybe_open_auto(channel,duration=cycle_duration,cooldown_seconds=0)

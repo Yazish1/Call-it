@@ -40,11 +40,12 @@ LMSR. Virtual points only: never add real money, purchases, or cash-out of any k
 
 !market "question", !odds, !buy <yes|no> <points>, !sell <yes|no> <shares>,
 !points, !leaderboard, !resolve <yes|no>, !cancel, !ping,
-!auto on|off|status
+!auto off|suggest|on, !approve, !skip, !auto templates <list>, !auto window <seconds>, !auto lock <seconds>, !auto status
 
-Auto markets are disabled by default per channel and rotate through chat volume,
-common-word, and unique-chatter templates. They resolve at their deadline, or
-cancel and refund if fewer than three distinct chatters participated.
+Auto markets default to suggest mode per channel: a moderator/broadcaster must approve
+proposals within 60 seconds. Modes are off, suggest, and on. Message-volume, emote,
+and unique-chatter markets exclude traders from activity counters and lock trading
+before the deadline. Settings are channel-scoped.
 `AUTO_MARKET_COOLDOWN_SECONDS` defaults to 120. Use simulator flags
 `--auto --auto-duration seconds` for a short end-to-end demonstration.
 Use `--demo` for looping auto-template cycles (60-second windows by default);
@@ -59,3 +60,5 @@ remains fixed-seed and deterministic when `--demo` is not selected.
 - Session 3: 01a1770e-59d6-7393-aba0-4a10817222bb
 - Session 4: 01a1771b-c58c-73d2-a789-b95567a0f36e
 - Session 5: 01a17b24-70da-7f42-9a92-c520a8799757
+- Session 6: 01a17b62-1f7d-7b11-82d1-5a6ef2445411
+- Session 7: 01a17b65-851f-7dd2-b8ae-4e112e2c5932
