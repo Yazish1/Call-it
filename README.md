@@ -18,11 +18,12 @@ Twitch Predictions runs one fixed-pool question at a time. Here, viewers can buy
 
 ## Demo
 
-Demo video: <ADD LINK>
+Demo video: https://youtu.be/KJtnoRKYKMc
 
 Screenshots (add 1–2 images at `docs/overlay.png`):
 
-![Live OBS overlay showing an open market and changing odds](docs/overlay.png)
+![Live OBS overlay showing an open market and changing odds](images/obs_source.png)
+![Demonstration](images/demo_source.png)
 
 <!-- Optional second screenshot: ![Resolved market result in the overlay](docs/overlay-result.png) -->
 
