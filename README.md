@@ -1,92 +1,157 @@
-# Twitch prediction-market chat bot
+# Twitch Chat Markets
 
-The bot connects to Twitch EventSub and runs a virtual-points prediction market
-with SQLite storage. It uses no real money.
+A prediction market for Twitch chat: viewers buy and sell YES/NO shares on live outcomes using virtual points, and the odds move with every trade. A broadcaster or moderator can open a market, or chat activity can open and resolve auto markets. A live OBS overlay shows the market, prices, recent trades, and top players.
 
-## Requirements
+## How it differs from Twitch Predictions
 
-- Python 3.11 or newer
-- A Twitch application and a user access token authorized for EventSub chat
-  (`user:read:chat` and `user:write:chat` scopes)
+Twitch Predictions runs one fixed-pool question at a time. Here, viewers can buy and sell throughout an open market, and prices update continuously using LMSR pricing.
 
-Create a `.env` file in the project root with these values:
+## Highlights
 
-```dotenv
-TWITCH_CLIENT_ID=your_client_id
-TWITCH_CLIENT_SECRET=your_client_secret
-TWITCH_ACCESS_TOKEN=your_user_access_token
-TWITCH_REFRESH_TOKEN=your_refresh_token
-TWITCH_USER_ID=your_twitch_user_id
-# Optional: comma-separated broadcaster user IDs (defaults to TWITCH_USER_ID)
-CHANNEL_IDS=123456789,987654321
-```
+- Twitch EventSub WebSocket integration for `channel.chat.message` and Helix `Send Chat Message`, with automatic access-token validation and refresh.
+- Auto markets based on chat message volume, the most common chat word (emote spam), and unique chatters; outcomes resolve from observed chat counts.
+- OBS browser-source overlay at `/overlay/<channel_id>`, updated live over Server-Sent Events.
+- Every viewer receives the same starting stake for each market. Points, markets, positions, and leaderboards are isolated per channel.
+- Virtual points only; there are no purchases, cash-outs, or real-money trading.
+- Offline simulator for trying the market and overlay without Twitch credentials or an audience.
+- Built with OpenAI Codex.
 
-Keep `.env` private. It is ignored by Git. The bot updates its access and
-rotating refresh tokens in this file when it refreshes the token.
+## Demo
 
-## Install and run
+Demo video: <ADD LINK>
+
+Screenshots (add 1–2 images at `docs/overlay.png`):
+
+![Live OBS overlay showing an open market and changing odds](docs/overlay.png)
+
+<!-- Optional second screenshot: ![Resolved market result in the overlay](docs/overlay-result.png) -->
+
+## Quick start: simulator, no Twitch credentials
+
+Requires Python 3.11 or newer. From the project root, install dependencies and start the looping simulator with its overlay:
 
 ```powershell
-py -3.11 -m venv .venv
+python -m venv .venv
 .venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
-python -m twitch_bot
+python -m twitch_bot.simulate --serve --demo
 ```
 
-The bot validates its token at startup, maintains an EventSub WebSocket
-connection, and logs connection, subscription, and command activity without
-logging credentials. Press `Ctrl+C` to stop it.
+The simulator prints overlay URLs for its fake channels. Open the first one in a browser or OBS Browser Source:
+
+```text
+http://127.0.0.1:8080/overlay/fake-channel-a
+```
+
+`--demo` loops through auto-market templates with simulated chat and trades; stop it with `Ctrl+C`. To choose a different overlay port, set `OVERLAY_PORT` before running (default `8080`).
+
+## Run it on Twitch
+
+1. In the [Twitch Developer Console](https://dev.twitch.tv/console/apps), register an application. Set OAuth Redirect URL to `http://localhost:3000` and choose **Confidential** as the client type. Save the client ID and client secret.
+2. Install and configure the [Twitch CLI](https://dev.twitch.tv/docs/cli/). Use the app's client ID and secret, then generate a user token with the required chat scopes:
+
+   ```sh
+   twitch configure
+   twitch token --user-token --scopes "user:read:chat user:write:chat"
+   ```
+
+   Copy the resulting user access token and refresh token. The Twitch account whose token you use is the bot account (`TWITCH_USER_ID`); it also needs to be authorized to read and write chat in each broadcaster's channel.
+3. Create `.env` in the project root with your own values (these placeholders are not credentials):
+
+   ```dotenv
+   TWITCH_CLIENT_ID=<your_client_id>
+   TWITCH_CLIENT_SECRET=<your_client_secret>
+   TWITCH_ACCESS_TOKEN=<your_user_access_token>
+   TWITCH_REFRESH_TOKEN=<your_refresh_token>
+   TWITCH_USER_ID=<bot_account_user_id>
+   # Optional: comma-separated broadcaster user IDs; defaults to TWITCH_USER_ID
+   CHANNEL_IDS=<broadcaster_user_id_1>,<broadcaster_user_id_2>
+   # Optional: defaults shown
+   OVERLAY_PORT=8080
+   AUTO_MARKET_COOLDOWN_SECONDS=120
+   ```
+
+4. Install the project dependencies if you have not already, then run the bot:
+
+   ```powershell
+   python -m venv .venv
+   .venv\Scripts\Activate.ps1
+   python -m pip install -r requirements.txt
+   python -m twitch_bot
+   ```
+
+   The bot validates its token, refreshes it when needed, connects to EventSub, and serves the overlay on `127.0.0.1`.
+5. In OBS, add a **Browser Source** with `http://127.0.0.1:8080/overlay/<channel_id>` (replace the port if `OVERLAY_PORT` differs, and replace `<channel_id>` with that broadcaster's user ID). Set the source to **480 × 600**.
+
+To add other channels, list their broadcaster user IDs in `CHANNEL_IDS`; each broadcaster must authorize the app/bot to access their chat. `CHANNEL_IDS` is optional and defaults to `TWITCH_USER_ID`.
 
 ## Chat commands
 
-| Command | Use |
-| --- | --- |
-| `!market "question"` | Broadcaster or moderator opens a market (one at a time). |
-| `!odds` | Show current YES/NO odds and the question. |
-| `!buy <yes|no> <points>` | Buy shares with whole-number virtual points. |
-| `!sell <yes|no> <shares>` | Sell held shares back to the market. |
-| `!points` | Show your market bankroll, open-market positions, and cumulative profit. |
-| `!leaderboard` | Show the top five cumulative profits in this channel. |
-| `!resolve <yes|no>` | Broadcaster or moderator resolves the market and pays winners. |
-| `!cancel` | Broadcaster or moderator cancels this channel's market and resets its stakes. |
-| `!ping` | Check that the bot is responding. |
-| `!auto on\|off\|status` | Broadcaster/moderator control for per-channel auto markets (off by default). |
+| Command | Who can use it | Example |
+| --- | --- | --- |
+| `!market "question"` | Broadcaster or moderator | `!market "Will the next match go to overtime?"` |
+| `!odds` | Anyone | `!odds` |
+| `!buy <yes\|no> <points>` | Anyone | `!buy yes 100` |
+| `!sell <yes\|no> <shares>` | Anyone | `!sell no 2.5` |
+| `!points` | Anyone | `!points` |
+| `!leaderboard` | Anyone | `!leaderboard` |
+| `!resolve <yes\|no>` | Broadcaster or moderator | `!resolve yes` |
+| `!cancel` | Broadcaster or moderator | `!cancel` |
+| `!ping` | Anyone | `!ping` |
+| `!auto on\|off\|status` | Broadcaster or moderator | `!auto on` |
 
-The bot subscribes once to chat for each channel in `CHANNEL_IDS`. A viewer's
-identity, points, positions, markets, and leaderboard are isolated by channel.
-Each viewer gets 1,000 points for every market in that channel. The leaderboard
-ranks cumulative profit across that channel's resolved markets. LMSR liquidity
-is controlled by `LIQUIDITY_B` and the per-market bankroll by
-`STAKE_PER_MARKET` in `twitch_bot/market.py`. The `market.db` database is
-created automatically. Existing single-channel databases are migrated to the
-channel in `TWITCH_USER_ID` at startup.
+## How it works
 
-Run the market tests with `python -m pytest`.
+EventSub WebSocket chat messages flow into command handlers and the market engine. The engine applies LMSR pricing and stores channel-scoped balances, markets, positions, and trades in SQLite. The overlay server exposes a browser page and a live SSE state stream.
 
-## OBS overlay
+For YES quantity `q_yes`, NO quantity `q_no`, and liquidity `b`, the LMSR cost function is:
 
-The bot serves a transparent, channel-specific overlay on `127.0.0.1:8080`.
-Set `OVERLAY_PORT` in `.env` to use a different port. In OBS, add a **Browser
-Source**, set its URL to `http://127.0.0.1:8080/overlay/<channel_id>` (replace
-`<channel_id>` with the broadcaster's Twitch user ID), and set width to **480**
-and height to **600**. The page uses a live Server-Sent Events stream and reconnects
-automatically if the connection drops.
+```text
+C(q_yes, q_no) = b · ln(exp(q_yes / b) + exp(q_no / b))
+```
 
-To preview it with fake channels, run `python -m twitch_bot.simulate --serve`.
-The simulator prints one overlay URL per channel. Use `--speed 2` to run the
-simulation about twice as fast, or `--speed 0.5` to slow it down.
-Run `python -m twitch_bot.simulate --auto --auto-duration 5 --serve` to preview
-an auto market resolving after five seconds with fake chat traffic.
-For looping demo markets, run `python -m twitch_bot.simulate --demo --serve`.
-Each cycle lasts about 60 seconds and includes personality-driven virtual trading
-and a mid-market odds swing. Set `--trade-rate 3` for about three trades per
-second across all viewers; the default is two. Demo mode rotates through the real
-auto-market templates; `--auto-duration 30` sets each window to 30 seconds.
-`--demo` implies auto markets, and it can also be combined with `--auto`.
+A buy costs the increase in `C` for the shares received; prices are the marginal probabilities given by the normalized exponential quantities. This makes the displayed YES and NO prices move as trades change the share quantities.
 
-Moderators can enable rotating activity markets with `!auto on`. A market opens
-only when the channel has no open market and the cooldown has elapsed. Markets
-use recent chat volume, common chat words, and unique chatter counts; deadlines
-resolve through the normal payout logic. Windows with fewer than three chatters
-are cancelled and refunded. `AUTO_MARKET_COOLDOWN_SECONDS` defaults to 120.
-The overlay includes a live deadline countdown.
+Auto markets are disabled by default in each channel. Once enabled with `!auto on`, the bot cycles through three templates using activity from the preceding five minutes: total chat messages, the most common word/emote, and unique chatters. Markets run for their template window (normally three or five minutes), resolve at the deadline from messages recorded during that market, and are cancelled with stakes reset if fewer than three distinct chatters participated. A cooldown separates auto markets; its default is 120 seconds.
+
+## Project layout and tests
+
+- `twitch_bot/__main__.py` — bot startup, token maintenance, and overlay server.
+- `twitch_bot/auth.py` — Twitch token validation and refresh.
+- `twitch_bot/twitch.py` — EventSub WebSocket and Helix chat calls.
+- `twitch_bot/commands.py` — chat command registry and handlers.
+- `twitch_bot/market.py` — channel-scoped SQLite market engine and auto-market logic.
+- `twitch_bot/pricing.py` — LMSR cost, prices, and share calculations.
+- `twitch_bot/overlay.py` — OBS page and SSE endpoint.
+- `twitch_bot/simulate.py` — offline simulator.
+- `tests/` — market, auto-market, simulator, and overlay tests.
+- `requirements.txt` — Python dependencies.
+
+Run the test suite with:
+
+```sh
+python -m pytest
+```
+
+Configuration constants in `twitch_bot/market.py`:
+
+| Setting | Default | Meaning |
+| --- | ---: | --- |
+| `LIQUIDITY_B` | `100.0` | LMSR liquidity for each market. |
+| `STAKE_PER_MARKET` | `1000.0` | Starting virtual points allocated to each viewer in each market. |
+| `AUTO_MARKET_COOLDOWN_SECONDS` | `120` seconds | Minimum wait between auto markets in a channel; can be overridden in `.env`. |
+| `OVERLAY_PORT` | `8080` | Local HTTP port for the overlay; can be overridden in `.env`. |
+
+Simulator options (run `python -m twitch_bot.simulate --help` for the parser's help): `--channel` can be repeated to choose fake channel IDs; `--viewers` defaults to `30`; `--duration` defaults to `10` seconds; `--serve` starts the overlay; `--speed` defaults to `1`; `--auto` demonstrates an auto market (`--auto-duration` defaults to 5 seconds); `--demo` loops through auto templates (`--auto-duration` defaults to 60 seconds); and `--trade-rate` defaults to 2 trades per second. The simulator uses a temporary SQLite database and does not connect to Twitch.
+
+## Safety and limits
+
+All balances are virtual points. There is no real-money functionality. This is a hackathon project, not a production service: it requires a valid Twitch user token and channel authorization, runs its overlay on the local machine, and uses a local SQLite database (`market.db`) without a hosted multi-instance setup. Auto-market results reflect only messages received during the window; sparse activity can cancel a market under the three-chatter minimum. A moderator/broadcaster manually resolves regular markets, so resolution depends on their judgment.
+
+Secrets belong in `.env`. The file is gitignored and must never be committed. Token refresh updates the access and refresh token values in that file; keep it private.
+
+## Built with Codex
+
+OpenAI Codex was used to build and refine the Twitch integration, virtual-points market engine, simulator, OBS overlay, and tests. Add the project session references used for this submission below.
+
+Codex session IDs: <ADD>
