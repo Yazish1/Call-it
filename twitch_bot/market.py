@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import math
+import os
 import sqlite3
 import time
+import re
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +14,7 @@ from .pricing import cost, prices, shares_for_cost
 
 LIQUIDITY_B = 100.0
 STAKE_PER_MARKET = 1000.0
+AUTO_MARKET_COOLDOWN_SECONDS = int(__import__('os').getenv("AUTO_MARKET_COOLDOWN_SECONDS", "120"))
 
 
 class MarketError(ValueError):
@@ -92,6 +95,9 @@ class MarketEngine:
             "CREATE UNIQUE INDEX IF NOT EXISTS one_open_market_per_channel "
             "ON markets(channel_id) WHERE status='open'",
             "CREATE INDEX IF NOT EXISTS trades_channel_market_idx ON trades(channel_id,market_id)",
+            """CREATE TABLE IF NOT EXISTS auto_settings(channel_id TEXT PRIMARY KEY,enabled INTEGER NOT NULL DEFAULT 0)""",
+            """CREATE TABLE IF NOT EXISTS chat_activity(channel_id TEXT NOT NULL,at REAL NOT NULL,user_id TEXT NOT NULL,text TEXT NOT NULL)""",
+            """CREATE TABLE IF NOT EXISTS auto_market_data(market_id INTEGER PRIMARY KEY,channel_id TEXT NOT NULL,deadline REAL NOT NULL,template INTEGER NOT NULL,opened_at REAL NOT NULL,closed_at REAL)""",
         )
 
     def _create_schema(self, legacy_channel_id: str | None) -> None:
@@ -402,6 +408,7 @@ class MarketEngine:
                 "WHERE channel_id=? AND id=?",
                 (outcome, channel_id, market_id),
             )
+            self.connection.execute("UPDATE auto_market_data SET closed_at=? WHERE market_id=?", (time.time(), market_id))
             winners.sort(key=lambda item: item[1], reverse=True)
             return {"question": market["question"], "outcome": outcome, "winners": winners[:3]}
 
@@ -417,4 +424,76 @@ class MarketEngine:
                 "UPDATE markets SET status='cancelled',resolved_at=CURRENT_TIMESTAMP "
                 "WHERE channel_id=? AND id=?", (channel_id, market_id),
             )
+            self.connection.execute("UPDATE auto_market_data SET closed_at=? WHERE market_id=?", (time.time(), market_id))
             return {"question": market["question"]}
+
+    def set_auto(self, channel_id: str, enabled: bool) -> None:
+        with self.connection:
+            self.connection.execute("INSERT INTO auto_settings(channel_id,enabled) VALUES(?,?) ON CONFLICT(channel_id) DO UPDATE SET enabled=excluded.enabled", (channel_id, int(enabled)))
+
+    def auto_enabled(self, channel_id: str) -> bool:
+        row = self.connection.execute("SELECT enabled FROM auto_settings WHERE channel_id=?", (channel_id,)).fetchone()
+        return bool(row and row[0])
+
+    def record_chat(self, channel_id: str, user_id: str, text: str, now: float | None = None) -> None:
+        now = time.time() if now is None else now
+        with self.connection:
+            self.connection.execute("INSERT INTO chat_activity VALUES(?,?,?,?)", (channel_id, now, user_id, text))
+            self.connection.execute("DELETE FROM chat_activity WHERE channel_id=? AND at<?", (channel_id, now-3600))
+
+    def maybe_open_auto(self, channel_id: str, now: float | None = None, duration: float | None = None,
+                        cooldown_seconds: int | None = None) -> dict[str, Any] | None:
+        now = time.time() if now is None else now
+        if not self.auto_enabled(channel_id) or self.connection.execute("SELECT 1 FROM markets WHERE channel_id=? AND status='open'", (channel_id,)).fetchone(): return None
+        last = self.connection.execute("SELECT MAX(COALESCE((SELECT closed_at FROM auto_market_data WHERE market_id=markets.id),strftime('%s',resolved_at))) FROM markets WHERE channel_id=? AND status IN ('resolved','cancelled')", (channel_id,)).fetchone()[0]
+        cooldown = (int(os.getenv("AUTO_MARKET_COOLDOWN_SECONDS", str(AUTO_MARKET_COOLDOWN_SECONDS)))
+                    if cooldown_seconds is None else cooldown_seconds)
+        if last is not None and now-float(last)<cooldown: return None
+        rows = self.connection.execute("SELECT at,user_id,text FROM chat_activity WHERE channel_id=? AND at>=? ORDER BY at", (channel_id,now-300)).fetchall()
+        count = len(rows); average = count
+        unique = len({r['user_id'] for r in rows})
+        words: dict[str,int] = {}
+        for row in rows:
+            for word in re.findall(r"\w+", row['text'].lower()):
+                if len(word)>1 and not word.startswith('!'): words[word]=words.get(word,0)+1
+        state = self.connection.execute("SELECT COALESCE((SELECT template FROM auto_market_data WHERE channel_id=? ORDER BY opened_at DESC LIMIT 1),-1)",(channel_id,)).fetchone()[0]
+        template=(int(state)+1)%3
+        if template==0:
+            duration=300 if duration is None else duration
+            threshold=max(1,round(average*duration/300*1.1)) if count else 50
+            question=f"Will chat send {threshold}+ messages {self._window_text(duration)}?"
+        elif template==1:
+            duration=180 if duration is None else duration
+            emote=max(words,key=words.get) if words else "Pog"
+            question=f"Will chat post '{emote}' {max(1,round(words.get(emote,0)*duration/180*1.1))}+ times {self._window_text(duration)}?"
+        else:
+            duration=300 if duration is None else duration
+            threshold=max(3,round(unique*duration/300*1.1)) if unique else 3
+            question=f"Will {threshold}+ different people chat {self._window_text(duration)}?"
+        market=self.open_market(channel_id,question)
+        with self.connection:
+            self.connection.execute("INSERT INTO auto_market_data(market_id,channel_id,deadline,template,opened_at) VALUES(?,?,?,?,?)",(market['id'],channel_id,now+duration,template,now))
+        market['deadline']=now+duration; return market
+
+    @staticmethod
+    def _window_text(duration: float) -> str:
+        if duration % 60 == 0:
+            minutes=int(duration//60)
+            return f"in the next {minutes} minute{'s' if minutes != 1 else ''}"
+        return f"in the next {duration:g} seconds"
+
+    def auto_market_info(self, channel_id: str):
+        return self.connection.execute("SELECT d.*,m.question FROM auto_market_data d JOIN markets m ON m.id=d.market_id WHERE d.channel_id=? AND m.status='open'",(channel_id,)).fetchone()
+
+    def settle_due_auto(self, channel_id: str, now: float | None = None) -> tuple[str,dict[str,Any]] | None:
+        now=time.time() if now is None else now; data=self.auto_market_info(channel_id)
+        if not data or now<float(data['deadline']): return None
+        rows=self.connection.execute("SELECT user_id,text FROM chat_activity WHERE channel_id=? AND at>=? AND at<=?",(channel_id,data['opened_at'],data['deadline'])).fetchall()
+        if len({r['user_id'] for r in rows})<3: return 'cancel',self.cancel(channel_id)
+        if data['template']==0:
+            threshold=int(re.search(r"send (\d+)",data['question']).group(1)); yes=len(rows)>=threshold
+        elif data['template']==1:
+            match=re.search(r"post '(.+)' (\d+)",data['question']); yes=sum(len(re.findall(r'\b'+re.escape(match.group(1))+r'\b',r['text'],re.IGNORECASE)) for r in rows)>=int(match.group(2))
+        else:
+            threshold=int(re.search(r"Will (\d+)",data['question']).group(1)); yes=len({r['user_id'] for r in rows})>=threshold
+        return 'resolve',self.resolve(channel_id,'yes' if yes else 'no')

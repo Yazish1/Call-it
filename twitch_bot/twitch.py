@@ -102,9 +102,18 @@ class TwitchClient:
         user_name = str(event.get("chatter_user_name", "viewer"))
         self.market.touch_user(channel_id, chatter_id, user_name)
         message = event.get("message")
+        text = message.get("text", "") if isinstance(message, dict) else ""
+        if isinstance(text, str):
+            self.market.record_chat(channel_id, chatter_id, text)
+            due=self.market.settle_due_auto(channel_id)
+            if due:
+                kind,result=due
+                reply=(f'Market resolved {result["outcome"].upper()}: "{result["question"]}".' if kind=="resolve" else f'Market cancelled: "{result["question"]}". Market stakes reset.')
+                await self.send_chat_message(reply[:500],channel_id)
+            opened=self.market.maybe_open_auto(channel_id)
+            if opened: await self.send_chat_message(f'Auto market: "{opened["question"]}" Buy with !buy <yes|no> <points>.',channel_id)
         if not isinstance(message, dict):
             return
-        text = message.get("text")
         if not isinstance(text, str) or not text.startswith("!"):
             return
         parts = text[1:].split(maxsplit=1)
@@ -165,6 +174,16 @@ class TwitchClient:
         raise ConnectionError("EventSub WebSocket closed")
 
     async def run(self) -> None:
+        async def deadline_watcher() -> None:
+            while not self._stopping:
+                for channel in self.channel_ids:
+                    due=self.market.settle_due_auto(channel)
+                    if due:
+                        kind,result=due
+                        reply=(f'Market resolved {result["outcome"].upper()}: "{result["question"]}".' if kind=="resolve" else f'Market cancelled: "{result["question"]}". Market stakes reset.')
+                        await self.send_chat_message(reply[:500],channel)
+                await asyncio.sleep(0.5)
+        watcher=asyncio.create_task(deadline_watcher())
         backoff = 1.0
         reconnect_url: str | None = None
         reconnecting = False
@@ -193,3 +212,5 @@ class TwitchClient:
             # A session_reconnect URL is returned only while a replacement is expected.
             if reconnect_url:
                 reconnecting = True
+        watcher.cancel()
+        await asyncio.gather(watcher,return_exceptions=True)

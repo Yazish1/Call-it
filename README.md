@@ -50,6 +50,7 @@ logging credentials. Press `Ctrl+C` to stop it.
 | `!resolve <yes|no>` | Broadcaster or moderator resolves the market and pays winners. |
 | `!cancel` | Broadcaster or moderator cancels this channel's market and resets its stakes. |
 | `!ping` | Check that the bot is responding. |
+| `!auto on\|off\|status` | Broadcaster/moderator control for per-channel auto markets (off by default). |
 
 The bot subscribes once to chat for each channel in `CHANNEL_IDS`. A viewer's
 identity, points, positions, markets, and leaderboard are isolated by channel.
@@ -74,3 +75,18 @@ automatically if the connection drops.
 To preview it with fake channels, run `python -m twitch_bot.simulate --serve`.
 The simulator prints one overlay URL per channel. Use `--speed 2` to run the
 simulation about twice as fast, or `--speed 0.5` to slow it down.
+Run `python -m twitch_bot.simulate --auto --auto-duration 5 --serve` to preview
+an auto market resolving after five seconds with fake chat traffic.
+For looping demo markets, run `python -m twitch_bot.simulate --demo --serve`.
+Each cycle lasts about 60 seconds and includes personality-driven virtual trading
+and a mid-market odds swing. Set `--trade-rate 3` for about three trades per
+second across all viewers; the default is two. Demo mode rotates through the real
+auto-market templates; `--auto-duration 30` sets each window to 30 seconds.
+`--demo` implies auto markets, and it can also be combined with `--auto`.
+
+Moderators can enable rotating activity markets with `!auto on`. A market opens
+only when the channel has no open market and the cooldown has elapsed. Markets
+use recent chat volume, common chat words, and unique chatter counts; deadlines
+resolve through the normal payout logic. Windows with fewer than three chatters
+are cancelled and refunded. `AUTO_MARKET_COOLDOWN_SECONDS` defaults to 120.
+The overlay includes a live deadline countdown.

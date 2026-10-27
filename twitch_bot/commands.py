@@ -41,6 +41,18 @@ async def ping(_context: CommandContext, _arguments: str) -> str:
     return "pong"
 
 
+@command("auto")
+async def auto(context: CommandContext, arguments: str) -> str:
+    if not _admin(context): return "Only the broadcaster or a moderator can change auto markets."
+    action=arguments.strip().lower()
+    if action=="on":
+        context.market.set_auto(context.channel_id, True); return "Auto markets enabled."
+    if action=="off":
+        context.market.set_auto(context.channel_id, False); return "Auto markets disabled."
+    if action=="status": return "Auto markets are " + ("ON." if context.market.auto_enabled(context.channel_id) else "OFF.")
+    return "Usage: !auto <on|off|status>"
+
+
 @command("market")
 async def new_market(context: CommandContext, arguments: str) -> str:
     if not _admin(context):

@@ -39,8 +39,22 @@ LMSR. Virtual points only: never add real money, purchases, or cash-out of any k
 ## Commands
 
 !market "question", !odds, !buy <yes|no> <points>, !sell <yes|no> <shares>,
-!points, !leaderboard, !resolve <yes|no>, !cancel, !ping
+!points, !leaderboard, !resolve <yes|no>, !cancel, !ping,
+!auto on|off|status
+
+Auto markets are disabled by default per channel and rotate through chat volume,
+common-word, and unique-chatter templates. They resolve at their deadline, or
+cancel and refund if fewer than three distinct chatters participated.
+`AUTO_MARKET_COOLDOWN_SECONDS` defaults to 120. Use simulator flags
+`--auto --auto-duration seconds` for a short end-to-end demonstration.
+Use `--demo` for looping auto-template cycles (60-second windows by default);
+`--trade-rate` controls the approximate aggregate trades per second. `--demo`
+implies auto mode and may be combined with `--auto`. The regular simulator
+remains fixed-seed and deterministic when `--demo` is not selected.
 
 ## Codex sessions (for submission)
 
-- Session 1 (steps 1-2): 01a176e8-602e-7131-a02c-52dc82a0fa0e
+- Session 1: 01a176e8-602e-7131-a02c-52dc82a0fa0e
+- Session 2: 01a17708-048c-76e1-8115-1f59c12a2d28
+- Session 3: 01a1770e-59d6-7393-aba0-4a10817222bb
+- Session 4: 01a1771b-c58c-73d2-a789-b95567a0f36e
