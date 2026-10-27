@@ -2,7 +2,7 @@
 
 ## Project
 
-Kalshi-style prediction market for Twitch chat (hackathon project, built with Codex).
+Prediction market for Twitch chat (hackathon project, built with Codex).
 Viewers trade virtual points on YES/NO outcomes via chat commands. Prices move with
 LMSR. Virtual points only: never add real money, purchases, or cash-out of any kind.
 

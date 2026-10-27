@@ -1,6 +1,15 @@
-# Call it
+<p align="center">
+  <img src="images/logo.png" alt="Call it logo" width="200">
+</p>
 
-A prediction market for Twitch chat: viewers buy and sell YES/NO shares on live outcomes using virtual points, and the odds move with every trade. A broadcaster or moderator can open a market, or chat activity can open and resolve auto markets. A live OBS overlay shows the market, prices, recent trades, and top players.
+<h1 align="center">Call it</h1>
+
+<p align="center">
+  <b>A prediction market for Twitch chat.</b><br>
+  Viewers buy and sell YES/NO shares on live outcomes with virtual points, and the odds move with every trade.
+</p>
+
+A broadcaster or moderator can open a market, or chat activity can open and resolve auto markets. A live OBS overlay shows the market, prices, recent trades, and top players.
 
 ## How it differs from Twitch Predictions
 
