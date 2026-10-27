@@ -58,3 +58,4 @@ remains fixed-seed and deterministic when `--demo` is not selected.
 - Session 2: 01a17708-048c-76e1-8115-1f59c12a2d28
 - Session 3: 01a1770e-59d6-7393-aba0-4a10817222bb
 - Session 4: 01a1771b-c58c-73d2-a789-b95567a0f36e
+- Session 5: 01a17b24-70da-7f42-9a92-c520a8799757

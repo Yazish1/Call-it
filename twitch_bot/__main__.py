@@ -36,8 +36,12 @@ async def run() -> None:
     token_task = asyncio.create_task(auth.maintain_token())
     try:
         async with overlay_server(market):
-            logging.getLogger(__name__).info("OBS overlay: http://127.0.0.1:%s/overlay/<channel_id>",
-                                              os.getenv("OVERLAY_PORT", "8080"))
+            overlay_port = os.getenv("OVERLAY_PORT", "8080")
+            for channel_id in channel_ids:
+                logging.getLogger(__name__).info(
+                    "OBS overlay for channel %s: http://127.0.0.1:%s/overlay/%s",
+                    channel_id, overlay_port, channel_id,
+                )
             async with TwitchClient(auth, home_channel_id, market, channel_ids) as client:
                 await client.run()
     finally:

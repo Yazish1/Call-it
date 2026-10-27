@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import json
 import math
 import os
@@ -146,8 +147,17 @@ def create_overlay_app(engine: MarketEngine) -> web.Application:
 async def overlay_server(engine: MarketEngine, port: int | None = None):
     runner = web.AppRunner(create_overlay_app(engine))
     await runner.setup()
-    site = web.TCPSite(runner, "127.0.0.1", port or int(os.getenv("OVERLAY_PORT", "8080")))
-    await site.start()
+    selected_port = port if port is not None else int(os.getenv("OVERLAY_PORT", "8080"))
+    site = web.TCPSite(runner, "127.0.0.1", selected_port)
+    try:
+        await site.start()
+    except OSError as exc:
+        await runner.cleanup()
+        if exc.errno == errno.EADDRINUSE:
+            raise RuntimeError(
+                f"Overlay port {selected_port} is already in use; set OVERLAY_PORT to a free port."
+            ) from exc
+        raise
     try:
         yield site
     finally:
